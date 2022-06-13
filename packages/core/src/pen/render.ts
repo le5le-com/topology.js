@@ -1,7 +1,7 @@
 import { LineAnimateType, Pen } from './model';
 import { getSplitAnchor, line } from '../diagrams';
 import { Direction } from '../data';
-import { distance, facePoint, Point, rotatePoint, scalePoint, translatePoint } from '../point';
+import { calcRotate, distance, facePoint, Point, rotatePoint, scalePoint, translatePoint } from '../point';
 import {
   calcCenter,
   calcExy,
@@ -280,6 +280,67 @@ function drawText(ctx: CanvasRenderingContext2D, pen: Pen) {
   ctx.restore();
 }
 
+function drawFillText(ctx: CanvasRenderingContext2D, pen: Pen, text: string) {
+  if (text == undefined) {
+    return;
+  }
+
+  const { fontStyle, fontWeight, fontSize, fontFamily, lineHeight, canvas } = pen.calculative;
+
+  const store = canvas.store;
+  ctx.save();
+
+  let fill: string = undefined;
+  if (pen.calculative.hover) {
+    fill = pen.hoverTextColor || pen.hoverColor || store.options.hoverColor;
+  } else if (pen.calculative.active) {
+    fill = pen.activeTextColor || pen.activeColor || store.options.activeColor;
+  }
+  ctx.fillStyle = fill || getTextColor(pen, store);
+
+  ctx.font = getFont({
+    fontStyle,
+    fontWeight,
+    fontFamily: fontFamily || store.options.fontFamily,
+    fontSize,
+    lineHeight,
+  });
+
+  const w = ctx.measureText(text).width;
+  let t: string;
+
+  let prev: Point;
+  for (const anchor of pen.calculative.worldAnchors) {
+    if (!prev) {
+      prev = anchor;
+      continue;
+    }
+
+    const dis = distance(prev, anchor);
+
+    const n = Math.floor(dis / w);
+    t = '';
+    for (let i = 0; i < n; i++) {
+      t += text;
+    }
+
+    const angle = calcRotate(prev, anchor) - 270;
+    ctx.save();
+    if (angle % 360 !== 0) {
+      const { x, y } = prev;
+      ctx.translate(x, y);
+      let rotate = (angle * Math.PI) / 180;
+      ctx.rotate(rotate);
+      ctx.translate(-x, -y);
+    }
+    ctx.fillText(t, prev.x, prev.y + lineHeight / 2);
+    ctx.restore();
+    prev = anchor;
+  }
+
+  ctx.restore();
+}
+
 export function drawIcon(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, pen: Pen) {
   const store = pen.calculative.canvas.store;
   ctx.save();
@@ -517,6 +578,12 @@ export function renderPen(ctx: CanvasRenderingContext2D, pen: Pen) {
 
   drawText(ctx, pen);
 
+  if (pen.type === PenType.Line && pen.fillTexts) {
+    for (const text of pen.fillTexts) {
+      drawFillText(ctx, pen, text);
+    }
+  }
+
   ctx.restore();
 }
 
@@ -654,6 +721,12 @@ export function renderPenRaw(ctx: CanvasRenderingContext2D, pen: Pen, rect?: Rec
   }
 
   drawText(ctx, pen);
+
+  if (pen.type === PenType.Line && pen.fillTexts) {
+    for (const text of pen.fillTexts) {
+      drawFillText(ctx, pen, text);
+    }
+  }
 
   ctx.restore();
 }

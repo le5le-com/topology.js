@@ -79,9 +79,7 @@ export type TextAlign = 'left' | 'center' | 'right';
 export type TextBaseline = 'top' | 'middle' | 'bottom';
 export type WhiteSpace = 'nowrap' | 'pre-line' | 'break-all' | '';
 // SetValue 方法参数类型
-export type IValue = Pen &
-  Partial<ChartData> &
-  Partial<Record<'tag' | 'newId', string>> & { [key: string]: any };
+export type IValue = Pen & Partial<ChartData> & Partial<Record<'tag' | 'newId', string>> & { [key: string]: any };
 
 // obj 类型数组 text 字段显示文字，其它属性选中后合并到画笔上
 // string 类型，只展示文字
@@ -271,6 +269,8 @@ export interface Pen extends Rect {
   // flip?: Flip;
   flipX?: boolean;
   flipY?: boolean;
+
+  fillTexts?: string[];
 
   hiddenText?: boolean; // 隐藏 text
   keepDecimal?: number; // undefined 显示原内容；0 显示整数
@@ -479,14 +479,7 @@ export interface ChartData {
 /**
  * dom 类型的 图形
  */
-export const isDomShapes = [
-  'gif',
-  'iframe',
-  'video',
-  'echarts',
-  'highcharts',
-  'lightningCharts',
-];
+export const isDomShapes = ['gif', 'iframe', 'video', 'echarts', 'highcharts', 'lightningCharts'];
 
 // 格式刷同步的属性
 export const formatAttrs: Set<string> = new Set([
