@@ -438,7 +438,8 @@ export class Canvas {
           x = -1;
         }
         this.translatePens(this.store.active, x, 0);
-        break;
+        // TODO: 原 break ，会触发后面的 render(false)
+        return;
       case 'ArrowUp':
         if (this.movingAnchor) {
           this.translateMovingAnchor(0, -1);
@@ -452,6 +453,7 @@ export class Canvas {
           y = -1;
         }
         this.translatePens(this.store.active, 0, y);
+        return;
         break;
       case 'ArrowRight':
         if (this.movingAnchor) {
@@ -465,7 +467,7 @@ export class Canvas {
           x = 1;
         }
         this.translatePens(this.store.active, x, 0);
-        break;
+        return;
       case 'ArrowDown':
         if (this.movingAnchor) {
           this.translateMovingAnchor(0, 1);
@@ -478,7 +480,7 @@ export class Canvas {
           y = 1;
         }
         this.translatePens(this.store.active, 0, y);
-        break;
+        return;
       case 'x':
       case 'X':
         if (e.ctrlKey || e.metaKey) {
@@ -2785,6 +2787,7 @@ export class Canvas {
 
       return;
     }
+    console.warn('render 执行了');
     this.renderTimer = undefined;
     this.lastRender = now;
     const offscreenCtx = this.offscreen.getContext('2d');
@@ -2806,160 +2809,132 @@ export class Canvas {
     this.dirty = false;
   };
 
-  diffRender(oldPens: Pen[]) {
-    // 1. 计算出需要擦除的 rects ，oldPen 和 newPen 都需要考虑
-    const cleanRects = this.getCleanRects(oldPens);
-    console.log('cleanRects', cleanRects);
-    // 2. 查看哪些画笔命中了这个区域，即需要重绘的画笔
+  /**
+   * 只重绘脏区域
+   * @param cleanRects 本次需要擦除的区域
+   * @param oldActiveRect 原 activeRect
+   */
+  renderDirty(cleanRects: Rect[], oldActiveRect?: Rect) {
+    // 查看哪些画笔命中了这个区域，即需要重绘的画笔
+    oldActiveRect && cleanRects.push(...this.getBorderRect(oldActiveRect));
     const hitPens = this.getHitPens(cleanRects);
-    console.log(hitPens, 'hitPens');
-    // 3. 先擦除
+    const { x: dataX, y: dataY } = this.store.data;
+    // 绘制到 离屏层
+    const offscreenCtx = this.offscreen.getContext('2d');
+    // clip
+    offscreenCtx.save();
+    offscreenCtx.translate(dataX, dataY);
+    for (const rect of cleanRects) {
+      offscreenCtx.save();
+      offscreenCtx.translate(rect.center.x, rect.center.y);
+      let rotate = (rect.rotate * Math.PI) / 180;
+      offscreenCtx.rotate(rotate);
+      offscreenCtx.translate(-rect.center.x, -rect.center.y);
+      offscreenCtx.rect(rect.x, rect.y, rect.width, rect.height);
+      offscreenCtx.restore();
+    }
+    offscreenCtx.clip();
+    // 擦除
+    offscreenCtx.clearRect(-dataX, -dataY, this.offscreen.width, this.offscreen.height);
+    // 重绘
+    this.renderPens(offscreenCtx as CanvasRenderingContext2D, hitPens);
+    this.renderBorder();
+    this.renderHoverPoint();
+    offscreenCtx.restore();
+    // ----------
+    // 绘制到 画布
     const ctx = this.canvas.getContext('2d');
+    // 1. 利用 clip ，方便，性能优于 render
     ctx.save();
-    ctx.translate(this.store.data.x, this.store.data.y);
-    // 3.1 擦除
+    ctx.translate(dataX, dataY);
     for (const rect of cleanRects) {
       ctx.save();
-      ctx.translate(0.5, 0.5);
-      ctx.clearRect(rect.x, rect.y, rect.width, rect.height);
+      ctx.translate(rect.center.x, rect.center.y);
+      let rotate = (rect.rotate * Math.PI) / 180;
+      ctx.rotate(rotate);
+      ctx.translate(-rect.center.x, -rect.center.y);
+      ctx.rect(rect.x, rect.y, rect.width, rect.height);
       ctx.restore();
     }
-    ctx.restore();
-
-    // 3.2 clip
-    ctx.save();
-    ctx.beginPath();
-    for (const rect of cleanRects) {
-      ctx.rect(rect.x, rect.y, rect.width, rect.height);
-    }
     ctx.clip();
-    console.log('111');
-    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    ctx.clearRect(-dataX, -dataY, this.canvas.width, this.canvas.height);
+    ctx.drawImage(this.offscreen, -dataX, -dataY, this.width, this.height);
     ctx.restore();
-    // 3.2 重绘
-    this.renderPens(ctx, hitPens);
+    // ----------
+    // 2. 不使用 clip
+    // ctx.save();
+    // ctx.translate(this.store.data.x, this.store.data.y);
+    // // 擦除
+    // for (const rect of cleanRects) {
+    //   ctx.clearRect(rect.x, rect.y, rect.width, rect.height);
+    //   const dpiRatio = this.store.dpiRatio;
+    //   const x = (rect.x + this.store.data.x) * dpiRatio;
+    //   const y = (rect.y + this.store.data.y) * dpiRatio;
+    //   ctx.drawImage(this.offscreen, x, y, rect.width * dpiRatio, rect.height * dpiRatio, rect.x, rect.y, rect.width, rect.height);
+    //   // ctx.drawImage(this.offscreen, rect.x, rect.y, rect.width, rect.height);
+    // }
+    // ctx.restore();
   }
-
-  getHitPens(rects: Rect[]) {
-    const pens: Pen[] = [];
-    for (const pen of this.store.data.pens) {
-      console.log('pen', pen);
-      if (pen) {
-        if (pen.visible === false || pen.locked === LockState.Disable || pen.parentId) {
-          continue;
-        }
-        const penEyeRect = calcEyeRect(pen.calculative.worldRect, pen.calculative.lineWidth);
-        for (const rect of rects) {
-          if (rectInRect(penEyeRect, rect)) {
-            // 先判断在区域内，若不在区域内，则锚点肯定不在框选区域内，避免每条连线过度计算
-            if (pen.type === PenType.Line) {
-              if (lineInRect(pen, this.dragRect)) {
-                pens.push(pen);
-                break;
-              }
-            } else {
-              pens.push(pen);
-              break;
-            }
-          }
-        }
-      } 
+  /**
+   * 得到 border 区域，用于擦除
+   * 对应 renderBorder 方法
+   */
+  getBorderRect(oldActiveRect: Rect): Rect[] {
+    if (!this.store.data.locked) {
+      // TODO: movingPens 可能出问题 
+      if (this.activeRect && !(this.store.active.length === 1 && this.store.active[0].type)) {
+        return [this.getEyeActiveRect(oldActiveRect), this.getEyeActiveRect(this.activeRect)];
+      }
     }
-    return pens;
-  }
-
-  getCleanRects(oldPens: Pen[]): Rect[] {
-    const newPens = deepClone(oldPens.map(pen => this.store.pens[pen.id]), true);
-    const pens = [...oldPens, ...newPens];
-    return pens.map(pen => calcEyeRect(pen.calculative.worldRect, pen.calculative.lineWidth));
+    return [];
   }
 
   /**
-   * 差异化 render 由于每次 render 都将整个页面擦除，当节点多了时，性能损耗大
-   * 像 move，resize，rotate 单个或多个节点时，没必要擦除整个画布
-   * TODO: 先不考虑 rotate
-   * @param oldRects 修改画笔的原 rect
-   * @param newRects 修改画笔的后 rect
+   * 通过一个 activeRect ，得到一个 可见的 activeRect ，即外区域
+   * @param rect 原 activeRect
    */
-  // diffRender(oldRects: Rect[], newRects: Rect[]) {
-  //   // 1. 计算实际需要擦除的 rect ；canvas 没有层的概念，需要计算出受干扰的 pens
-  //   const realPens = this.getDisturbPens(oldRects, newRects, []);
-  //   // console.log('realPens', realPens);
-  //   // 2. 先后覆盖问题，所以 realPens 中的顺序需要与 store 中相同
-  //   const changedPens = this.orderPens(realPens);
-  //   // 3. 先擦除
-  //   const ctx = this.canvas.getContext('2d');
-  //   ctx.save();
-  //   ctx.translate(this.store.data.x, this.store.data.y);
-  //   // 3.1 oldRects 在 getDisturbPens 方法中已经计算出来了
-  //   // console.log('oldRects', deepClone(oldRects));
-  //   for (const oldRect of oldRects) {
-  //     ctx.save();
-  //     ctx.translate(0.5, 0.5);
-  //     ctx.clearRect(oldRect.x, oldRect.y, oldRect.width, oldRect.height);
-  //     ctx.restore();
-  //   }
-  //   ctx.restore();
-  //   // 3.2 重绘
-  //   // TODO: 绘制还是用 offscreen 绘制
-  //   const offscreenCtx = this.offscreen.getContext('2d');
-  //   offscreenCtx.clearRect(0, 0, this.offscreen.width, this.offscreen.height);
-  //   if (this.store.data.background) {
-  //     offscreenCtx.save();
-  //     offscreenCtx.fillStyle = this.store.data.background;
-  //     offscreenCtx.translate(0.5, 0.5);
-  //     for (const oldRect of oldRects) {
-  //       offscreenCtx.fillRect(oldRect.x, oldRect.y, oldRect.width, oldRect.height);
-  //     }
-  //     offscreenCtx.restore();
-  //   }
-  //   // TODO: 区域网格
-  //   offscreenCtx.save();
-  //   offscreenCtx.translate(this.store.data.x, this.store.data.y);
-  //   // TODO: 改动的 pens 才进行重绘
-  //   this.renderPens(changedPens);
-  //   // this.renderPens();
-  //   // this.renderBorder();
-  //   // this.renderHoverPoint();
-  //   offscreenCtx.restore();
-
-  //   // this.renderMagnifier();
-
-  //   // this.renderRule();
-
-  //   ctx.drawImage(this.offscreen, 0, 0, this.width, this.height);
-  // }
-
-  orderPens(pens: Pen[]) {
-    const resPens = [];
-    for (const storePen of this.store.data.pens) {
-      if (pens.find(pen => pen === storePen)) {
-        resPens.push(storePen);
-      }
+  private getEyeActiveRect(rect: Rect): Rect {
+    let activeRect = deepClone(rect);
+    const extraW = 12 as const;
+    activeRect.x -= extraW / 2;
+    activeRect.y -= extraW / 2;
+    activeRect.width += extraW;
+    activeRect.height += extraW;
+    if (
+      getPensLock(this.store.active) ||
+      getPensDisableRotate(this.store.active) ||
+      this.store.options.disableRotate
+    ) {
+      calcExy(activeRect);
+      return activeRect;
     }
-    return resPens;
+    // 本来应该是 30 
+    activeRect.y -= 31;
+    activeRect.height += 31;
+    // 此处不可更改 center ，center 与旋转点相关
+    calcExy(activeRect);
+    return activeRect;
   }
 
-  getDisturbPens(oldRects: Rect[], newRects: Rect[], lastPens: Pen[]): Pen[] {
-    const newPens = [...lastPens];
-    for (const pen of this.store.data.pens) {
-      for (const oldRect of oldRects) {
-        if (rectInRect(oldRect, pen.calculative.worldRect) && !newPens.find(newPen => newPen.id === pen.id)) {
-          newPens.push(pen);
-          oldRects.push(calcEyeRect(pen.calculative.worldRect, pen.calculative.lineWidth));
+  private getHitPens(rects: Rect[]) {
+    return this.store.data.pens.filter(pen => {
+      if (pen.visible === false) {
+        return false;
+      }
+      const penEyeRect = calcEyeRect(pen.calculative.worldRect, pen.calculative.lineWidth);
+      for (const rect of rects) {
+        if (rectInRect(penEyeRect, rect)) {
+          if (pen.type === PenType.Line) {
+            if (lineInRect(pen, rect)) {
+              return true;
+            }
+          } else {
+            return true;
+          }
         }
       }
-      for (const newRect of newRects) {
-        if (rectInRect(newRect, pen.calculative.worldRect) && !newPens.find(newPen => newPen.id === pen.id)) {
-          newPens.push(pen);
-          oldRects.push(calcEyeRect(pen.calculative.worldRect, pen.calculative.lineWidth));
-        }
-      }
-    }
-    if (newPens.length === lastPens.length) {
-      return newPens;
-    } 
-    return this.getDisturbPens(oldRects, newRects, newPens);
+      return false;
+    })
   }
 
   renderPens = (ctx: CanvasRenderingContext2D, pens: Pen[]) => {
@@ -3739,16 +3714,18 @@ export class Canvas {
     }
 
     const initPens = !doing && deepClone(pens, true);
+    const oldActiveRect = deepClone(this.activeRect, true);
     translateRect(this.activeRect, x, y);
 
-    const oldPens: Pen[] = [];
+    const cleanRects: Rect[] = [];
     const containChildPens = this.getAllByPens(pens);
     pens.forEach((pen) => {
       if (pen.locked >= LockState.DisableMove) {
         return;
       }
 
-      oldPens.push(deepClone(pen, true));
+      // 移动前
+      cleanRects.push(calcEyeRect(pen.calculative.worldRect, pen.calculative.lineWidth));
       if (pen.type === PenType.Line) {
         translateLine(pen, x, y);
         this.notInDisconnect(pen, containChildPens);
@@ -3769,6 +3746,8 @@ export class Canvas {
         this.updateLines(pen);
       }
       pen.onMove?.(pen);
+      // 移动后
+      cleanRects.push(calcEyeRect(pen.calculative.worldRect, pen.calculative.lineWidth));
     });
     this.getSizeCPs();
 
@@ -3777,10 +3756,8 @@ export class Canvas {
         pen.type && this.initLineRect(pen);
       }
     });
-    // console.log(oldRects, 'oldRects');
-    // console.log(newRects, 'newRects');
     
-    this.diffRender(oldPens);
+    this.renderDirty(cleanRects, oldActiveRect);
     // TODO: 为了看到效果，暂时调用 render
     // this.render();
     this.tooltip.translate(x, y);
@@ -4102,7 +4079,7 @@ export class Canvas {
       dels.forEach((pen) => {
         this.store.animates.delete(pen);
       });
-      this.diffRender(oldRects, newRects);
+      // this.diffRender(oldRects, newRects);
       // this.render(false);
       this.animateRendering = false;
       this.animate();

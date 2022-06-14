@@ -143,6 +143,10 @@ export function rectInRect(source: Rect, target: Rect, allIn?: boolean) {
     // 根据 rotate 扩大 rect
     source = getRectOfPoints(rectToPoints(source)); // 更改 source 引用地址值，不影响原值
   }
+  if (target.rotate) {
+    // 根据 rotate 扩大 rect
+    target = getRectOfPoints(rectToPoints(target)); // 更改 target 引用地址值，不影响原值
+  }
   if (allIn) {
     return source.x > target.x && source.ex < target.ex && source.y > target.y && source.ey < target.ey;
   }
@@ -440,12 +444,12 @@ export function calcEyeRect(rect: Rect, lineWidth: number) {
   // 与 dpiRatio 无关，偶尔计算错误，暂时不知道为什么
   // 稍微多计算一点，可能消耗更多的绘制性能
   const isDouble = !(lineWidth % 2);
-  const offset = 10;
+  const offset = 2;
   const realRect: Rect = {
-    x: rect.x - 1 * lineWidth / 2 - (!isDouble && 0.5) - offset / 2,
-    y: rect.y - 1 * lineWidth / 2 - (!isDouble && 0.5) - offset / 2,
-    width: rect.width + lineWidth * 1 + (!isDouble && 1) + offset,
-    height: rect.height + lineWidth * 1 + (!isDouble && 1) + offset,
+    x: Math.floor(rect.x - 1 * lineWidth / 2 - (!isDouble && 0.5) - offset / 2),
+    y: Math.floor(rect.y - 1 * lineWidth / 2 - (!isDouble && 0.5) - offset / 2),
+    width: Math.ceil(rect.width + lineWidth * 1 + (!isDouble && 1) + offset),
+    height: Math.ceil(rect.height + lineWidth * 1 + (!isDouble && 1) + offset),
     rotate: rect.rotate
   };
   calcCenter(realRect);

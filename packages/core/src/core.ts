@@ -35,7 +35,7 @@ import {
   useStore,
 } from './store';
 import { formatPadding, Padding, s8, valueInArray, valueInRange } from './utils';
-import { calcCenter, calcRelativeRect, getRect, Rect } from './rect';
+import { calcCenter, calcEyeRect, calcRelativeRect, getRect, Rect } from './rect';
 import { deepClone } from './utils/clone';
 import { Event, EventAction, EventName } from './event';
 import { Map } from './map';
@@ -956,11 +956,12 @@ export class Topology {
   }
 
   setValue(data: IValue, { render = true }: { render?: boolean } = {}) {
-    this._setValue(data).forEach((pen) => {
+    const { pens, rects, oldActiveRect } = this._setValue(data);
+    pens.forEach(pen => {
       this.store.emitter.emit('valueUpdate', pen);
     });
 
-    render && this.render();
+    render && this.canvas.renderDirty(rects, oldActiveRect);
   }
 
   _setValue(data: IValue) {
@@ -975,18 +976,27 @@ export class Topology {
     } else {
       pens = this.find(data.tag);
     }
+    const rects: Rect[] = [];
     pens.forEach((pen) => {
+      rects.push(calcEyeRect(pen.calculative.worldRect, pen.calculative.lineWidth));
       const afterData: IValue = pen.onBeforeValue ? pen.onBeforeValue(pen, data as ChartData) : data;
       this.canvas.updateValue(pen, afterData);
       pen.onValue?.(pen);
+      rects.push(calcEyeRect(pen.calculative.worldRect, pen.calculative.lineWidth));
     });
 
+    let oldActiveRect: Rect = undefined;
     if (!this.store.data.locked && this.store.active.length && !this.canvas.movingPens) {
       // 移动过程中，不重算 activeRect
+      oldActiveRect = deepClone(this.canvas.activeRect);
       this.canvas.calcActiveRect();
     }
 
-    return pens;
+    return {
+      pens,
+      rects,
+      oldActiveRect
+    };
   }
 
   pushHistory(action: EditAction) {
